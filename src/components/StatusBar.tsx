@@ -7,18 +7,34 @@ export function StatusBar(props: {
   mood: Mood;
   status: string;
   screenSummary?: ScreenSummary;
+  hasApiKey: boolean;
+  model: string;
 }) {
   return (
-    <Box flexDirection="column" borderStyle="single" paddingX={1}>
-      <Text>
-        {props.petName} | Mood: {props.mood} | Status: {props.status}
-      </Text>
+    <Box flexDirection="column" width="100%" borderStyle="round" borderColor="cyan" paddingX={1}>
+      <Box justifyContent="space-between">
+        <Text>
+          <Text color="cyan" bold>{props.petName}</Text>
+          <Text color="gray"> / terminal desktop pet</Text>
+        </Text>
+        <Text>
+          <Text color={props.hasApiKey ? 'green' : 'yellow'}>{props.hasApiKey ? 'vision ready' : 'local mode'}</Text>
+        </Text>
+      </Box>
+      <Box marginTop={1}>
+        <Text color="gray">mood </Text>
+        <Text color="magenta">{props.mood}</Text>
+        <Text color="gray">   status </Text>
+        <Text color="green">{props.status}</Text>
+        <Text color="gray">   model </Text>
+        <Text color="cyan">{props.model}</Text>
+      </Box>
       {props.screenSummary ? (
-        <Text color="gray">
-          Screen: {props.screenSummary.summary} ({props.screenSummary.confidence})
+        <Text color="gray" wrap="wrap">
+          screen: {props.screenSummary.summary} ({props.screenSummary.confidence})
         </Text>
       ) : (
-        <Text color="gray">Screen: 未观察。输入 observe 后才会截图。</Text>
+        <Text color="gray">screen: agent 可在当前回合需要时调用 observe_screen。</Text>
       )}
     </Box>
   );

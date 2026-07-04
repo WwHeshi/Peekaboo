@@ -27,6 +27,7 @@ export type PetReply = {
 
 export type AppConfig = {
   apiKey?: string;
+  baseUrl?: string;
   model: string;
   petName: string;
 };

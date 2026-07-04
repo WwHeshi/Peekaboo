@@ -6,5 +6,8 @@ export function createOpenAIClient(config: AppConfig): OpenAI | undefined {
     return undefined;
   }
 
-  return new OpenAI({apiKey: config.apiKey});
+  return new OpenAI({
+    apiKey: config.apiKey,
+    baseURL: config.baseUrl
+  });
 }

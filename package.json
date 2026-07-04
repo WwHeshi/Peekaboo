@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx src/main.tsx",
+    "dev": "node --no-deprecation --import tsx src/main.tsx",
     "build": "tsc --noEmit",
-    "start": "tsx src/main.tsx"
+    "start": "node --no-deprecation --import tsx src/main.tsx"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

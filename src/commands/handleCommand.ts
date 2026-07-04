@@ -1,7 +1,6 @@
 import type OpenAI from 'openai';
-import {generateChatReply, generateObservationReply} from '../ai/agent.js';
+import {generateChatReply} from '../ai/agent.js';
 import {isMood} from '../emotion/moods.js';
-import {observeScreen} from '../perception/observeScreen.js';
 import type {AppConfig, AppState, ChatMessage} from '../types.js';
 
 export async function handleCommand(options: {
@@ -47,33 +46,6 @@ export async function handleCommand(options: {
     }
 
     return appendPet(state, `我还没有这个表情：${argument || '(空)'}`, 'thinking', '可用情绪：idle smile happy curious thinking surprised sleepy sad');
-  }
-
-  if (command === 'observe') {
-    const summary = await observeScreen({
-      client: options.client,
-      config: options.config
-    });
-
-    const reply = await generateObservationReply({
-      client: options.client,
-      config: options.config,
-      summary,
-      messages: state.messages
-    });
-
-    return {
-      ...state,
-      mood: reply.mood,
-      status: '观察完成',
-      screenSummary: summary,
-      messages: [
-        ...state.messages,
-        {role: 'you' as const, text: 'observe'},
-        {role: 'system' as const, text: `桌面摘要：${summary.summary}`},
-        {role: 'pet' as const, text: reply.text}
-      ].slice(-12)
-    };
   }
 
   const userText = command === 'chat' ? argument : raw;
