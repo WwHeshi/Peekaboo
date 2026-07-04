@@ -35,8 +35,8 @@ export function CommandInput(props: {
 
   return (
     <Box flexDirection="column" width="100%">
-      <Box borderStyle="round" borderColor={props.disabled ? 'gray' : 'green'} paddingX={1}>
-        <Text color={props.disabled ? 'gray' : 'green'} bold>
+      <Box borderStyle="round" borderColor="gray" paddingX={1}>
+        <Text color="gray" bold>
           &gt;
         </Text>
         <Text color={props.disabled ? 'gray' : value ? 'white' : 'gray'}>

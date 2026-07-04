@@ -10,7 +10,7 @@ import type {AppState, ChatMessage, Mood} from './types.js';
 
 const initialState: AppState = {
   mood: 'idle',
-  status: '直接输入聊天内容',
+  status: '待机',
   messages: [
     {
       role: 'pet',
@@ -53,7 +53,7 @@ export function App() {
       setState(current => ({
         ...current,
         mood: 'sad',
-        status: '出错了',
+        status: '出错',
         messages: [
           ...current.messages,
           {
@@ -73,7 +73,7 @@ export function App() {
     const startMessages = appendMessages(state.messages, {role: 'you', text: userText}, {role: 'pet', text: ''});
     setState({
       ...state,
-      status: 'agent 正在思考',
+      status: '思考中',
       messages: startMessages
     });
 
@@ -89,7 +89,7 @@ export function App() {
         usedObserveTool = true;
         setState(current => ({
           ...current,
-          status: '正在使用 observe_screen 截图',
+          status: '观察屏幕中',
           screenSummary: {
             summary: '本轮已通过 observe_screen 工具观察桌面。',
             confidence: 'high'
@@ -110,7 +110,7 @@ export function App() {
         streamedText += delta;
         setState(current => ({
           ...current,
-          status: usedObserveTool ? '正在根据屏幕回应' : '正在回应',
+          status: usedObserveTool ? '根据屏幕回应中' : '回应中',
           messages: replaceLastPetMessage(current.messages, streamedText)
         }));
       }
@@ -119,7 +119,7 @@ export function App() {
     setState(current => ({
       ...current,
       mood: scheduledMoodChange ? current.mood : reply.mood,
-      status: '已回应',
+      status: '待机',
       screenSummary: usedObserveTool
         ? {
             summary: '本轮已通过 observe_screen 工具观察桌面。',
@@ -158,8 +158,6 @@ export function App() {
         mood={state.mood}
         message={latestPetMessage}
         status={state.status}
-        screenSummary={state.screenSummary}
-        hasApiKey={Boolean(config.apiKey)}
         model={config.model}
       />
       <CommandInput disabled={busy} onSubmit={submit} />

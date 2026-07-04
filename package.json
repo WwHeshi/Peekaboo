@@ -2,6 +2,7 @@
   "name": "peekaboo",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "node --no-deprecation --import tsx src/main.tsx",
