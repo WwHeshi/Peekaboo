@@ -1,49 +1,80 @@
-import React, {useState} from 'react';
-import {Box, Text, useInput} from 'ink';
+import React, {useEffect, useRef} from 'react';
+import ansiEscapes from 'ansi-escapes';
+import {useStdout} from 'ink';
 
 export function CommandInput(props: {
   disabled: boolean;
   onSubmit: (value: string) => void;
 }) {
-  const [value, setValue] = useState('');
+  const {stdout} = useStdout();
+  const disabledRef = useRef(props.disabled);
+  const onSubmitRef = useRef(props.onSubmit);
+  const bufferRef = useRef('');
+  const promptTimerRef = useRef<NodeJS.Timeout>();
 
-  useInput((input, key) => {
+  useEffect(() => {
+    disabledRef.current = props.disabled;
+    onSubmitRef.current = props.onSubmit;
+  }, [props.disabled, props.onSubmit]);
+
+  useEffect(() => {
+    if (promptTimerRef.current) {
+      clearTimeout(promptTimerRef.current);
+      promptTimerRef.current = undefined;
+    }
+
     if (props.disabled) {
+      stdout.write(ansiEscapes.cursorHide);
       return;
     }
 
-    if (key.return) {
-      props.onSubmit(value);
-      setValue('');
-      return;
+    promptTimerRef.current = setTimeout(() => {
+      stdout.write(`${ansiEscapes.cursorShow}> `);
+      promptTimerRef.current = undefined;
+    }, 50);
+
+    return () => {
+      if (promptTimerRef.current) {
+        clearTimeout(promptTimerRef.current);
+        promptTimerRef.current = undefined;
+      }
+    };
+  }, [props.disabled, stdout]);
+
+  useEffect(() => {
+    const stdin = process.stdin;
+    stdin.setEncoding('utf8');
+
+    if (stdin.isTTY) {
+      stdin.setRawMode(false);
     }
 
-    if (key.backspace || key.delete) {
-      setValue(current => current.slice(0, -1));
-      return;
+    stdin.resume();
+
+    function handleData(chunk: string) {
+      bufferRef.current += chunk;
+      const lines = bufferRef.current.split(/\r?\n/);
+      bufferRef.current = lines.pop() ?? '';
+
+      for (const line of lines) {
+        stdout.write(`${ansiEscapes.cursorUp(1)}${ansiEscapes.eraseLine}`);
+
+        if (!disabledRef.current) {
+          onSubmitRef.current(line);
+        }
+      }
     }
 
-    if (key.ctrl && input === 'c') {
-      process.exit(0);
-      return;
-    }
+    stdin.on('data', handleData);
 
-    if (input) {
-      setValue(current => `${current}${input}`);
-    }
-  });
+    return () => {
+      stdin.off('data', handleData);
+      if (promptTimerRef.current) {
+        clearTimeout(promptTimerRef.current);
+      }
+      stdout.write(ansiEscapes.cursorShow);
+    };
+  }, [stdout]);
 
-  return (
-    <Box flexDirection="column" width="100%">
-      <Box borderStyle="round" borderColor="gray" paddingX={1}>
-        <Text color="gray" bold>
-          &gt;
-        </Text>
-        <Text color={props.disabled ? 'gray' : value ? 'white' : 'gray'}>
-          {' '}
-          {props.disabled ? '处理中...' : value || '输入消息后按 Enter'}
-        </Text>
-      </Box>
-    </Box>
-  );
+  return null;
 }

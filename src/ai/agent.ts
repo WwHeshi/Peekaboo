@@ -145,7 +145,7 @@ export async function runPetAgentTurnStream(options: {
   let usedObserveScreen = false;
   let currentMood = initialMood;
   let selectedMood: Mood | undefined;
-  let visibleText = '';
+  let usedSetMood = false;
 
   for (let step = 1; step <= 4; step += 1) {
     const allowObserveScreen = Boolean(observeScreen) && !usedObserveScreen;
@@ -156,33 +156,28 @@ export async function runPetAgentTurnStream(options: {
         config,
         messages: agentMessages,
         allowObserveScreen,
-        onDelta(delta) {
-          visibleText += delta;
-          onDelta?.(delta);
-        }
+        allowSetMood: !usedSetMood
       });
 
       if (result.toolCalls.length === 0) {
         const finalText = result.text.trim() || '我刚刚有点走神了，再说一次好吗？';
-        if (!result.text.trim()) {
-          visibleText += finalText;
-          onDelta?.(finalText);
-        }
+        await emitSyntheticStream(finalText, onDelta);
 
         return {
-          text: visibleText.trim() || finalText,
+          text: finalText,
           mood: selectedMood ?? currentMood
         };
       }
 
       agentMessages.push({
         role: 'assistant',
-        content: result.text || null,
+        content: null,
         tool_calls: result.toolCalls
       });
 
       for (const toolCall of result.toolCalls) {
         if (toolCall.function.name === 'set_mood') {
+          usedSetMood = true;
           const moodChange = parseSetMood(toolCall.function.arguments);
           if (moodChange) {
             const {mood, delaySeconds} = moodChange;
@@ -693,6 +688,8 @@ function buildAgentMessages(options: {
         'set_mood 支持 delay_seconds，可用于“几秒后再变成某个情绪”这类延迟切换。',
         '你可以调用 get_mood 查看当前表情。',
         '每次回复前，尽量用 set_mood 选择一个贴合当前回答的情绪：idle、smile、happy、curious、thinking、surprised、sleepy、sad。',
+        '同一轮最多调用一次 set_mood；如果工具结果已经说明情绪已切换或已安排延迟切换，直接回复用户，不要重复设置。',
+        '如果决定调用任何工具，本次 assistant 消息不要输出用户可见文字，等待工具结果后再回复。',
         '当你切换情绪时，用户可见回复的语气也必须和该情绪一致，例如 happy 更轻快，curious 更像提问和观察，thinking 更谨慎，sad 更低落但不夸张。',
         '只有当当前问题需要屏幕画面、窗口状态、用户正在做什么，或用户用自然语言要求你看屏幕时，才调用 observe_screen。',
         '不要声称你在后台持续监控；你只能通过工具在当前回合观察一次。',
@@ -724,10 +721,14 @@ async function runAgentStep(options: {
   config: AppConfig;
   messages: ChatMessageParam[];
   allowObserveScreen: boolean;
-  onDelta?: (delta: string) => void;
+  allowSetMood: boolean;
 }): Promise<{text: string; toolCalls: ChatToolCall[]}> {
-  const {client, config, messages, allowObserveScreen, onDelta} = options;
-  const tools = allowObserveScreen ? [setMoodTool, getMoodTool, observeScreenTool] : [setMoodTool, getMoodTool];
+  const {client, config, messages, allowObserveScreen, allowSetMood} = options;
+  const tools = [
+    ...(allowSetMood ? [setMoodTool] : []),
+    getMoodTool,
+    ...(allowObserveScreen ? [observeScreenTool] : [])
+  ];
 
   const stream = await client.chat.completions.create({
     model: config.model,
@@ -749,7 +750,6 @@ async function runAgentStep(options: {
     const content = delta?.content ?? '';
     if (content) {
       text += content;
-      onDelta?.(content);
     }
 
     for (const toolCallDelta of delta?.tool_calls ?? []) {
