@@ -2,9 +2,28 @@ import type OpenAI from 'openai';
 import {z} from 'zod';
 import type {AppConfig, ChatMessage, Mood, PetReply, ScreenSummary} from '../types.js';
 
+const moodSchema = z.enum(['idle', 'smile', 'happy', 'curious', 'thinking', 'surprised', 'sleepy', 'sad']);
+const delaySecondsSchema = z.preprocess(value => {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+
+  if (typeof value === 'string') {
+    return Number.parseFloat(value);
+  }
+
+  return value;
+}, z.number().min(0).max(3600).optional());
+
+const setMoodArgumentsSchema = z.object({
+  mood: moodSchema,
+  delay_seconds: delaySecondsSchema,
+  delaySeconds: delaySecondsSchema
+});
+
 const replySchema = z.object({
   text: z.string().min(1),
-  mood: z.enum(['idle', 'smile', 'happy', 'curious', 'thinking', 'surprised', 'sleepy', 'sad'])
+  mood: moodSchema
 });
 
 export async function generateChatReply(options: {
@@ -101,17 +120,18 @@ export async function runPetAgentTurnStream(options: {
   config: AppConfig;
   messages: ChatMessage[];
   userText: string;
+  currentMood: Mood;
   observeScreen?: () => Promise<Buffer>;
-  screenSummary?: ScreenSummary;
   onToolUse?: (toolName: 'observe_screen') => void;
+  onMoodChange?: (mood: Mood, options?: {delayMs?: number}) => void;
   onDelta?: (delta: string) => void;
 }): Promise<PetReply> {
-  const {client, config, messages, userText, observeScreen, screenSummary, onToolUse, onDelta} = options;
+  const {client, config, messages, userText, currentMood: initialMood, observeScreen, onToolUse, onMoodChange, onDelta} = options;
 
   if (!client) {
     const reply = {
       text: `我听到了：“${userText}”。配置 OPENAI_API_KEY 后，我就能更自然地回应你。`,
-      mood: 'smile' as const
+      mood: initialMood
     };
     await emitSyntheticStream(reply.text, onDelta);
     return reply;
@@ -120,32 +140,38 @@ export async function runPetAgentTurnStream(options: {
   const agentMessages = buildAgentMessages({
     config,
     messages,
-    userText,
-    screenSummary
+    userText
   });
   let usedObserveScreen = false;
+  let currentMood = initialMood;
+  let selectedMood: Mood | undefined;
+  let visibleText = '';
 
   for (let step = 1; step <= 4; step += 1) {
-    const allowTools = Boolean(observeScreen) && !usedObserveScreen;
+    const allowObserveScreen = Boolean(observeScreen) && !usedObserveScreen;
 
     try {
       const result = await runAgentStep({
         client,
         config,
         messages: agentMessages,
-        allowTools,
-        onDelta
+        allowObserveScreen,
+        onDelta(delta) {
+          visibleText += delta;
+          onDelta?.(delta);
+        }
       });
 
       if (result.toolCalls.length === 0) {
         const finalText = result.text.trim() || '我刚刚有点走神了，再说一次好吗？';
         if (!result.text.trim()) {
+          visibleText += finalText;
           onDelta?.(finalText);
         }
 
         return {
-          text: finalText,
-          mood: inferMood(finalText, usedObserveScreen ? 'curious' : 'smile')
+          text: visibleText.trim() || finalText,
+          mood: selectedMood ?? currentMood
         };
       }
 
@@ -156,6 +182,47 @@ export async function runPetAgentTurnStream(options: {
       });
 
       for (const toolCall of result.toolCalls) {
+        if (toolCall.function.name === 'set_mood') {
+          const moodChange = parseSetMood(toolCall.function.arguments);
+          if (moodChange) {
+            const {mood, delaySeconds} = moodChange;
+            if (delaySeconds > 0) {
+              onMoodChange?.(mood, {delayMs: delaySeconds * 1000});
+              agentMessages.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                content: `已安排 ${formatDelaySeconds(delaySeconds)} 后切换为 ${mood}。当前情绪仍是 ${currentMood}。`
+              });
+              continue;
+            }
+
+            currentMood = mood;
+            selectedMood = mood;
+            onMoodChange?.(mood);
+            agentMessages.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: `情绪已切换为 ${mood}。`
+            });
+          } else {
+            agentMessages.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: 'set_mood 参数无效，请使用 idle、smile、happy、curious、thinking、surprised、sleepy、sad 之一。'
+            });
+          }
+          continue;
+        }
+
+        if (toolCall.function.name === 'get_mood') {
+          agentMessages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: `当前情绪是 ${currentMood}。`
+          });
+          continue;
+        }
+
         if (toolCall.function.name !== 'observe_screen' || !observeScreen) {
           agentMessages.push({
             role: 'tool',
@@ -191,13 +258,13 @@ export async function runPetAgentTurnStream(options: {
         });
       }
     } catch (error) {
-      if (step === 1 && allowTools) {
+      if (step === 1) {
         return runFallbackAgentTurn({
           client,
           config,
           messages,
           userText,
-          screenSummary,
+          currentMood,
           observeScreen,
           onToolUse,
           onDelta
@@ -210,7 +277,7 @@ export async function runPetAgentTurnStream(options: {
 
   const fallback = '我试着调用工具看了一下，但这轮对话没有收束好。你可以换个说法再问我一次。';
   onDelta?.(fallback);
-  return {text: fallback, mood: 'thinking'};
+  return {text: fallback, mood: selectedMood ?? currentMood};
 }
 
 export async function generateChatReplyStream(options: {
@@ -218,6 +285,7 @@ export async function generateChatReplyStream(options: {
   config: AppConfig;
   messages: ChatMessage[];
   userText: string;
+  currentMood?: Mood;
   screenSummary?: ScreenSummary;
   observeScreen?: () => Promise<Buffer>;
   forceObserve?: boolean;
@@ -236,7 +304,7 @@ export async function generateChatReplyStream(options: {
       text: forceObserve
         ? '我已经触发了一次截图，但当前没有 OPENAI_API_KEY，所以还不能理解画面内容。'
         : `我听到了：“${userText}”。配置 OPENAI_API_KEY 后，我就能更自然地回应你。`,
-      mood: forceObserve ? 'curious' as const : 'smile' as const
+      mood: options.currentMood ?? (forceObserve ? 'curious' as const : 'smile' as const)
     };
     await emitSyntheticStream(reply.text, onDelta);
     return reply;
@@ -299,7 +367,7 @@ export async function generateChatReplyStream(options: {
 
   return {
     text: finalText,
-    mood: inferMood(finalText, 'smile')
+    mood: options.currentMood ?? 'smile'
   };
 }
 
@@ -308,6 +376,7 @@ export async function generateObservationReplyStream(options: {
   config: AppConfig;
   summary: ScreenSummary;
   messages: ChatMessage[];
+  currentMood?: Mood;
   onDelta?: (delta: string) => void;
 }): Promise<PetReply> {
   const {client, config, summary, messages, onDelta} = options;
@@ -315,7 +384,7 @@ export async function generateObservationReplyStream(options: {
   if (!client) {
     const reply = {
       text: `我看到了一些画面，但还不能认真理解：${summary.summary}`,
-      mood: 'curious' as const
+      mood: options.currentMood ?? 'curious' as const
     };
     await emitSyntheticStream(reply.text, onDelta);
     return reply;
@@ -366,7 +435,7 @@ export async function generateObservationReplyStream(options: {
 
   return {
     text: finalText,
-    mood: inferMood(finalText, 'curious')
+    mood: options.currentMood ?? 'curious'
   };
 }
 
@@ -405,6 +474,23 @@ function safeJson(content: string): unknown {
   }
 }
 
+function parseSetMood(argumentsText: string): {mood: Mood; delaySeconds: number} | undefined {
+  const json = safeJson(argumentsText);
+  const parsed = setMoodArgumentsSchema.safeParse(json);
+  if (!parsed.success) {
+    return undefined;
+  }
+
+  return {
+    mood: parsed.data.mood,
+    delaySeconds: parsed.data.delay_seconds ?? parsed.data.delaySeconds ?? 0
+  };
+}
+
+function formatDelaySeconds(seconds: number): string {
+  return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)} 秒`;
+}
+
 async function emitSyntheticStream(text: string, onDelta?: (delta: string) => void): Promise<void> {
   if (!onDelta) {
     return;
@@ -421,30 +507,6 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => {
     setTimeout(resolve, ms);
   });
-}
-
-function inferMood(text: string, fallback: Mood): Mood {
-  if (/[?？]|好奇|看看|是什么|怎么/.test(text)) {
-    return 'curious';
-  }
-
-  if (/抱歉|难过|不太|失败|糟|累/.test(text)) {
-    return 'sad';
-  }
-
-  if (/哇|居然|竟然|!|！/.test(text)) {
-    return 'surprised';
-  }
-
-  if (/开心|太好|不错|喜欢|哈哈|可以|很棒/.test(text)) {
-    return 'happy';
-  }
-
-  if (/想|分析|也许|可能|正在/.test(text)) {
-    return 'thinking';
-  }
-
-  return fallback;
 }
 
 async function shouldUseObserveTool(options: {
@@ -570,13 +632,55 @@ const observeScreenTool: ChatTool = {
   }
 };
 
+const setMoodTool: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'set_mood',
+    description: '切换桌面宠物当前表情。这个工具只影响界面情绪，不会作为用户可见文字展示。',
+    parameters: {
+      type: 'object',
+      properties: {
+        mood: {
+          type: 'string',
+          enum: ['idle', 'smile', 'happy', 'curious', 'thinking', 'surprised', 'sleepy', 'sad'],
+          description: '当前回复最适合的情绪。'
+        },
+        delay_seconds: {
+          type: 'number',
+          minimum: 0,
+          maximum: 3600,
+          description: '可选。延迟多少秒后再切换情绪；省略或 0 表示立刻切换。例如 5 表示 5 秒后切换。'
+        },
+        reason: {
+          type: 'string',
+          description: '简短说明为什么选择这个情绪。'
+        }
+      },
+      required: ['mood'],
+      additionalProperties: false
+    }
+  }
+};
+
+const getMoodTool: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'get_mood',
+    description: '查看桌面宠物当前表情。用于需要基于当前情绪决定下一步回应或是否切换情绪时。',
+    parameters: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false
+    }
+  }
+};
+
 function buildAgentMessages(options: {
   config: AppConfig;
   messages: ChatMessage[];
   userText: string;
-  screenSummary?: ScreenSummary;
 }): ChatMessageParam[] {
-  const {config, messages, userText, screenSummary} = options;
+  const {config, messages, userText} = options;
   const history = messages.map(messageToModelMessage);
 
   return [
@@ -585,17 +689,15 @@ function buildAgentMessages(options: {
       content: [
         `你是 ${config.petName}，一个住在终端里的桌面宠物。`,
         '你可以像 agent 一样在当前用户回合中调用 observe_screen 工具查看桌面截图。',
+        '你也可以调用 set_mood 工具切换自己的表情。set_mood 是内部状态工具，不要把工具名或情绪字段说给用户。',
+        'set_mood 支持 delay_seconds，可用于“几秒后再变成某个情绪”这类延迟切换。',
+        '你可以调用 get_mood 查看当前表情。',
+        '每次回复前，尽量用 set_mood 选择一个贴合当前回答的情绪：idle、smile、happy、curious、thinking、surprised、sleepy、sad。',
         '只有当当前问题需要屏幕画面、窗口状态、用户正在做什么，或用户用自然语言要求你看屏幕时，才调用 observe_screen。',
         '不要声称你在后台持续监控；你只能通过工具在当前回合观察一次。',
         '回复使用简短中文，最多两句话。不要输出 JSON，不要 Markdown。'
       ].join('\n')
     },
-    ...(screenSummary
-      ? [{
-          role: 'system' as const,
-          content: `上次屏幕工具状态：${screenSummary.summary}`
-        }]
-      : []),
     ...history,
     {
       role: 'user',
@@ -620,20 +722,18 @@ async function runAgentStep(options: {
   client: OpenAI;
   config: AppConfig;
   messages: ChatMessageParam[];
-  allowTools: boolean;
+  allowObserveScreen: boolean;
   onDelta?: (delta: string) => void;
 }): Promise<{text: string; toolCalls: ChatToolCall[]}> {
-  const {client, config, messages, allowTools, onDelta} = options;
+  const {client, config, messages, allowObserveScreen, onDelta} = options;
+  const tools = allowObserveScreen ? [setMoodTool, getMoodTool, observeScreenTool] : [setMoodTool, getMoodTool];
+
   const stream = await client.chat.completions.create({
     model: config.model,
     stream: true,
     messages,
-    ...(allowTools
-      ? {
-          tools: [observeScreenTool],
-          tool_choice: 'auto' as const
-        }
-      : {})
+    tools,
+    tool_choice: 'auto'
   });
 
   let text = '';
@@ -682,12 +782,12 @@ async function runFallbackAgentTurn(options: {
   config: AppConfig;
   messages: ChatMessage[];
   userText: string;
-  screenSummary?: ScreenSummary;
+  currentMood: Mood;
   observeScreen?: () => Promise<Buffer>;
   onToolUse?: (toolName: 'observe_screen') => void;
   onDelta?: (delta: string) => void;
 }): Promise<PetReply> {
-  const {client, config, messages, userText, screenSummary, observeScreen, onToolUse, onDelta} = options;
+  const {client, config, messages, userText, currentMood, observeScreen, onToolUse, onDelta} = options;
   let screenImage: Buffer | undefined;
 
   if (observeScreen && shouldObserveFromText(userText)) {
@@ -711,7 +811,6 @@ async function runFallbackAgentTurn(options: {
         role: 'user',
         content: buildUserContent({
           config,
-          screenSummary,
           recent,
           userText,
           screenImage
@@ -738,6 +837,6 @@ async function runFallbackAgentTurn(options: {
 
   return {
     text: finalText,
-    mood: inferMood(finalText, screenImage ? 'curious' : 'smile')
+    mood: currentMood
   };
 }

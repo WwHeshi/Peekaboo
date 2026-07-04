@@ -10,7 +10,3 @@ export const moodEyes: Record<Mood, [string, string]> = {
   sleepy: ['_', '_'],
   sad: ['T', 'T']
 };
-
-export function isMood(value: string): value is Mood {
-  return Object.hasOwn(moodEyes, value);
-}

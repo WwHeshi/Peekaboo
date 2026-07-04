@@ -24,7 +24,7 @@ export function CommandInput(props: {
     }
 
     if (key.ctrl && input === 'c') {
-      props.onSubmit('quit');
+      process.exit(0);
       return;
     }
 
@@ -41,14 +41,8 @@ export function CommandInput(props: {
         </Text>
         <Text color={props.disabled ? 'gray' : value ? 'white' : 'gray'}>
           {' '}
-          {props.disabled ? '处理中...' : value || '输入命令后按 Enter'}
+          {props.disabled ? '处理中...' : value || '输入消息后按 Enter'}
         </Text>
-      </Box>
-      <Box paddingX={1} justifyContent="space-between">
-        <Text color="gray">直接输入聊天</Text>
-        <Text color="gray">需要时自动看屏幕</Text>
-        <Text color="gray">clear 清空</Text>
-        <Text color="gray">quit 退出</Text>
       </Box>
     </Box>
   );
