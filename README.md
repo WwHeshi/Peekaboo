@@ -1,27 +1,28 @@
 # Peekaboo
 
-Peekaboo is a tiny TUI desktop pet prototype. It lives in your terminal, shows emotions with two big eyes, and only captures your full desktop when you explicitly type `observe`.
+Peekaboo 是一个很小的终端桌宠原型。它住在你的终端里，用两只大眼睛表达情绪，并且只有在你明确输入 `observe` 时才会截取整个桌面进行观察。
 
-Current scope:
+当前范围：
 
-- TUI pet face with eye-based moods
-- Manual `observe` command for full desktop screenshot understanding
-- Simple chat command
-- No OCR
-- No background monitoring
-- No clipboard, file, or browser history access
+- 终端 TUI 桌宠表情
+- 基于眼睛形状的情绪状态
+- 手动 `observe` 命令，用于截取全桌面并理解画面
+- 简单聊天命令
+- 不做 OCR
+- 不做后台监控
+- 不读取剪贴板、文件或浏览器历史
 
-## Start
+## 启动
 
 ```bash
 npm.cmd run dev
 ```
 
-If PowerShell blocks `npm.ps1`, use `npm.cmd` as shown above.
+如果 PowerShell 阻止运行 `npm.ps1`，请使用上面的 `npm.cmd`。
 
-## Config
+## 配置
 
-Edit `.env` in this folder:
+编辑项目根目录下的 `.env`：
 
 ```env
 OPENAI_API_KEY=your_api_key
@@ -29,19 +30,19 @@ OPENAI_MODEL=gpt-4o-mini
 PET_NAME=Peekaboo
 ```
 
-Without `OPENAI_API_KEY`, the app can still start, but `observe` only verifies screenshot capture and will not understand the image.
+如果没有配置 `OPENAI_API_KEY`，应用仍然可以启动，但 `observe` 只会验证截图是否成功，不会理解截图内容。
 
-## Commands
+## 命令
 
 ```text
-observe        capture the full desktop and let Peekaboo observe it
-chat hello     chat with Peekaboo
-mood happy     switch mood manually
-clear          clear current session
-quit           exit
+observe        截取全桌面，并让 Peekaboo 观察
+chat 你好      和 Peekaboo 聊天
+mood happy     手动切换情绪
+clear          清空当前会话
+quit           退出
 ```
 
-## Mood Eyes
+## 情绪眼睛
 
 ```text
 idle       O     O
